@@ -3,7 +3,7 @@ const express = require("express");
 const bodyParser = require("body-parser");
 const ejs = require("ejs");
 const mongoose = require("mongoose");
-const encrypt = require("mongoose-encryption");
+const md5 = require("md5");
 
 const app = express();
 
@@ -25,15 +25,6 @@ const userSchema = new mongoose.Schema ({
     email: String,
     password: String
 });
-
-// Accessing the enviroment variables
-// console.log(process.env.API_KEY);
-
-// For encryption, key was here
-
-// Do this before (X)
-userSchema.plugin(encrypt, { secret: process.env.SECRET,  encryptedFields: ["password"] });   // this will encrypt the whole DB (which V don't want and V will search through our DB in future and V can't search for encrypted messages) so here our task is to encrypt only the password field and leave the email field unencrypted
-
 
 // Defining a DB   =>   STEP (X)
 const User = mongoose.model("User", userSchema);
@@ -57,7 +48,7 @@ app.post("/register", function(req, res) {
     // Grab the users email and password and save them to the DB
     const newUser = new User({
         email: req.body.username,
-        password: req.body.password
+        password: md5(req.body.password)    // turning the password into a hash function
     });
 
     // saving the user to DB
@@ -74,7 +65,7 @@ app.post("/register", function(req, res) {
 app.post("/login", function(req, res) {
     // Grab the details entered
     const emailEntered = req.body.username;
-    const passwordEntered = req.body.password;
+    const passwordEntered = md5(req.body.password);
 
     // find the details entered in the DB
     User.findOne({email: emailEntered}, function(err, foundUSer) {
