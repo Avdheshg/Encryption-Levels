@@ -3,8 +3,10 @@ const express = require("express");
 const bodyParser = require("body-parser");
 const ejs = require("ejs");
 const mongoose = require("mongoose");
-const bcrypt = require("bcrypt");
-const saltRounds = 10;
+const session = require('express-session');
+const passport = require("passport");
+const passportLocalMongoose = require("passport-local-mongoose");
+
 
 const app = express();
 
@@ -17,9 +19,23 @@ app.use(express.static("public"));
 // Using EJS
 app.set('view engine', 'ejs');
 
+// Setting and using the cookie session or initilize our session
+// this needs to be defined before the DB setup
+app.use(session({
+    secret: "Our little secret.",
+    resave: false,
+    saveUninitialized: false
+}));
+
+// initilizing the passport
+app.use(passport.initialize());
+// using the session or using passport to manage out sessions
+app.use(passport.session());
+
 /* ==== Setting DB ======== */
 // connecting to the MDB
-mongoose.connect("mongodb://localhost:27017/userDB");
+mongoose.connect("mongodb://localhost:27017/userDB", {useNewUrlParser: true});
+// mongoose.set("useCreateIndex", true);      // saying that this is invalid
 
 // Defining a schema for DB
 const userSchema = new mongoose.Schema ({
@@ -27,8 +43,20 @@ const userSchema = new mongoose.Schema ({
     password: String
 });
 
+// Enabling the passportLocalMongoose or telling the userSchema to use passportLocalMongoose as a plugin
+userSchema.plugin(passportLocalMongoose);
+
 // Defining a DB   =>   STEP (X)
 const User = mongoose.model("User", userSchema);
+
+// using passport to create a local login strategy
+passport.use(User.createStrategy());
+
+// Using passportLocalMongoose
+// This will take the details of the user and turn them into a cookie 
+passport.serializeUser(User.serializeUser());           
+// This will break the cookie and get the details back
+passport.deserializeUser(User.deserializeUser());
 
 // ======= Setting Routes   =======
 app.get("/", function(req, res) {
@@ -42,57 +70,63 @@ app.get("/register", function(req, res) {
 app.get("/login", function(req, res) {
     res.render("login");
 });
+      
+// Defining a "/secrets" route 
+app.get("/secrets", function(req, res) {
+    // checking if the user is already logged in, then only he is allowed to see the "secrets" page directly otherwise (not logged in) he will directed to the login page
+    if (req.isAuthenticated()) {
+        res.render("secrets");
+    } else {
+        res.redirect("/login");
+    }
+});
 
 
 // post routes for /register
 app.post("/register", function(req, res) {
-
-    // Here the bcrypt will generate a hash function also using the salting and return return the generated hash function to us so that V can save them into DB
-    bcrypt.hash(req.body.password, saltRounds, function(err, hash) {
-        
-        // After V have generated our hash function then V will define a new user with that hash function and will save it to the DB
-
-        // Grab the users email and password and save them to the DB
-        const newUser = new User({
-            email: req.body.username,
-            password: hash    // turning the password into a hash function
-        });
-
-        // saving the user to DB
-        newUser.save(function(err) {
-            if (!err) {
-                res.render("secrets");
-            } else {
-                console.log(err);
-            }
-        });
+    
+    // This method is from passport-local-mongoose and will reduce our effort for creating the new user and saving it to the DB
+    User.register({username: req.body.username}, req.body.password, function(err, newRegisteredUser) {
+        if (err) {
+            console.log(err);
+            // redirect the user to register page so that they can try again
+            req.redirect("/register");
+        } else {
+            passport.authenticate("local")(req, res, function() {
+                res.redirect("/secrets");
+            });
+        }
     });
     
-    
+});
+
+// logout route
+app.get("/logout", function(req, res) {
+    req.logout();
+    // redirecting to the home page
+    res.redirect("/");
 });
 
 // post route for "/login"
 app.post("/login", function(req, res) {
-    // Grab the details entered
-    const emailEntered = req.body.username;
-    const passwordEntered = req.body.password;
 
-    // find the details entered in the DB
-    User.findOne({email: emailEntered}, function(err, foundUser) {
+    // Defining a new user using the details entered while login
+    const newUser = new User({
+        username: req.body.username,
+        password: req.body.password
+    });
+
+    // Now V will use passport to login the above user and authenticate them
+    req.login(newUser, function(err) {
         if (err) {
             console.log(err);
         } else {
-            if (foundUser) {
-                // Here V will again generate the hash with the password entered and then compare it with the password(saved as hash) present in the DB 
-                // This function takes 2 params one is entered text and another is the hsah present in our DB(our hash is present in foundUser.password)
-                bcrypt.compare(passwordEntered, foundUser.password, function(err, isHashMatched) {
-                    if (isHashMatched) {
-                        res.render("secrets");
-                    }
-                });
-            }
+            passport.authenticate("local")(req, res, function() {
+                res.redirect("/secrets");
+            });
         }
     });
+
 });
 
 
